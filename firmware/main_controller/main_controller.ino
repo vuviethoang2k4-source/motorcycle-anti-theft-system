@@ -8,6 +8,7 @@
 #include "protocol.h"
 #include "sms_manager.h"
 #include "state_machine.h"
+#include "storage_manager.h"
 #include "system_types.h"
 #include "vehicle_inputs.h"
 
@@ -50,6 +51,33 @@ RemoteCommand smsRequestToRemoteCommand(
         default:
             return RemoteCommand::NONE;
     }
+}
+
+/*
+ * Mọi nguồn điều khiển đều đi qua cùng một hàm:
+ * - remote ESP-NOW;
+ * - SMS.
+ *
+ * Nhờ đó ARM/DISARM luôn được lưu nhất quán vào NVS.
+ */
+CommandResult executeSystemCommand(
+    RemoteCommand command)
+{
+    const CommandResult result =
+        StateMachine::handleCommand(command);
+
+    if (result != CommandResult::SUCCESS) {
+        return result;
+    }
+
+    if (command == RemoteCommand::ARM) {
+        StorageManager::saveAntiTheftArmed(true);
+    } else if (
+        command == RemoteCommand::DISARM) {
+        StorageManager::saveAntiTheftArmed(false);
+    }
+
+    return result;
 }
 
 String buildStatusMessage()
@@ -128,7 +156,7 @@ void processSmsRequests()
     }
 
     const CommandResult result =
-        StateMachine::handleCommand(command);
+        executeSystemCommand(command);
 
     SmsManager::queueMessage(
         buildCommandReply(command, result));
@@ -159,6 +187,30 @@ void queueAlarmSmsOnStateTransition()
     previousState = currentState;
 }
 
+void restorePersistedAntiTheftState()
+{
+    if (!StorageManager::isReady()) {
+        Serial.println(
+            "[STORAGE] Start in DISARMED because NVS is unavailable.");
+        return;
+    }
+
+    if (!StorageManager::loadAntiTheftArmed()) {
+        Serial.println(
+            "[STORAGE] Restored state: DISARMED");
+        return;
+    }
+
+    /*
+     * Chỉ khôi phục ARMED, không khôi phục ALARM/FIND/SILENCE.
+     */
+    StateMachine::handleCommand(
+        RemoteCommand::ARM);
+
+    Serial.println(
+        "[STORAGE] Restored state: ARMED");
+}
+
 void setup()
 {
     Serial.begin(MainConfig::DEBUG_BAUD);
@@ -166,7 +218,7 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 7");
+    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 8");
     Serial.println("======================================");
 
     OutputController::begin();
@@ -174,10 +226,14 @@ void setup()
     MotionSensor::begin();
     GpsManager::begin();
     SmsManager::begin();
+
+    StorageManager::begin();
     StateMachine::begin();
+    restorePersistedAntiTheftState();
+
     EspNowManager::begin();
 
-    Serial.println("Phase 7 initialization completed.");
+    Serial.println("Phase 8 initialization completed.");
 }
 
 void loop()
@@ -207,7 +263,7 @@ void loop()
             espNowCommand,
             packetId)) {
         const CommandResult result =
-            StateMachine::handleCommand(
+            executeSystemCommand(
                 espNowCommand);
 
         EspNowManager::sendResponse(
@@ -229,6 +285,12 @@ void loop()
 
         Serial.print("[STATUS] State=");
         Serial.print(StateMachine::getStateText());
+
+        Serial.print(" | NVS=");
+        Serial.print(
+            StorageManager::isReady()
+                ? "READY"
+                : "FAIL");
 
         Serial.print(" | ACC=");
         Serial.print(
