@@ -1,0 +1,56 @@
+# ==============================
+# THÔNG TIN BÍ MẬT
+# ==============================
+secrets.h
+**/secrets.h
+.env
+*.env
+
+# ==============================
+# FILE BIÊN DỊCH ESP32 / ARDUINO
+# ==============================
+build/
+**/build/
+*.bin
+*.elf
+*.hex
+*.map
+
+# ==============================
+# ARDUINO IDE
+# ==============================
+*.ino.standard.hex
+*.ino.with_bootloader.hex
+
+# ==============================
+# VISUAL STUDIO CODE
+# ==============================
+.vscode/
+.idea/
+
+# ==============================
+# FILE TẠM CỦA HỆ ĐIỀU HÀNH
+# ==============================
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ==============================
+# FILE TẠM VÀ FILE SAO LƯU
+# ==============================
+*.tmp
+*.log
+*.bak
+*.old
+*~
+
+# ==============================
+# FILE TẠM ALTIUM DESIGNER
+# ==============================
+History/
+Project Logs for*/
+Project Outputs for*/
+*.PrjPcbStructure
+*.PcbDocPreview
+*.SchDocPreview
+*.DsnWrk
