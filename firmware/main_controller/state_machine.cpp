@@ -15,6 +15,8 @@ uint32_t findingStartedAt = 0;
 uint32_t accActiveSince = 0;
 uint32_t alarmInputClearSince = 0;
 
+const char *alarmReasonText = "NONE";
+
 const char *stateToText(SystemState state)
 {
     switch (state) {
@@ -91,6 +93,7 @@ void enterDisarmed()
 {
     currentState = SystemState::DISARMED;
     stateBeforeFinding = SystemState::DISARMED;
+    alarmReasonText = "NONE";
 
     resetAlarmTimers();
 
@@ -104,6 +107,7 @@ void enterArmed()
 {
     currentState = SystemState::ARMED;
     stateBeforeFinding = SystemState::ARMED;
+    alarmReasonText = "NONE";
 
     resetAlarmTimers();
 
@@ -117,13 +121,14 @@ void enterAlarm(const char *reason)
 {
     currentState = SystemState::ALARM;
     stateBeforeFinding = SystemState::ALARM;
+    alarmReasonText = reason;
 
     resetAlarmTimers();
 
     OutputController::setStarterLocked(true);
 
     Serial.print("[ALARM] Triggered by ");
-    Serial.println(reason);
+    Serial.println(alarmReasonText);
 }
 
 void startFinding()
@@ -238,6 +243,7 @@ void processSilencedState(
         stateBeforeFinding = SystemState::ARMED;
     }
 
+    alarmReasonText = "NONE";
     alarmInputClearSince = 0;
 
     Serial.println(
@@ -284,10 +290,6 @@ void processAlarmInputs(
         return;
     }
 
-    /*
-     * MotionSensor đã xác nhận rung/nghiêng đủ thời gian,
-     * nên có thể kích hoạt báo động ngay tại đây.
-     */
     if (inputs.motionDetected) {
         enterAlarm("VIBRATION OR TILT");
         return;
@@ -360,6 +362,11 @@ const char *getStateText()
 bool isAntiTheftArmed()
 {
     return requiresStarterLock(currentState);
+}
+
+const char *getAlarmReasonText()
+{
+    return alarmReasonText;
 }
 
 }  // namespace StateMachine

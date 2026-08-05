@@ -6,6 +6,7 @@
 #include "motion_sensor.h"
 #include "output_controller.h"
 #include "protocol.h"
+#include "sms_manager.h"
 #include "state_machine.h"
 #include "system_types.h"
 #include "vehicle_inputs.h"
@@ -30,6 +31,134 @@ const char *commandToText(RemoteCommand command)
     }
 }
 
+RemoteCommand smsRequestToRemoteCommand(
+    SmsRequestType request)
+{
+    switch (request) {
+        case SmsRequestType::ARM:
+            return RemoteCommand::ARM;
+
+        case SmsRequestType::DISARM:
+            return RemoteCommand::DISARM;
+
+        case SmsRequestType::FIND:
+            return RemoteCommand::FIND;
+
+        case SmsRequestType::SILENCE:
+            return RemoteCommand::SILENCE;
+
+        default:
+            return RemoteCommand::NONE;
+    }
+}
+
+String buildStatusMessage()
+{
+    String message = "STATE: ";
+    message += StateMachine::getStateText();
+
+    message += "\nACC: ";
+    message += VehicleInputs::isAccOn()
+                   ? "ON"
+                   : "OFF";
+
+    message += "\nMOTION: ";
+    message += MotionSensor::isMotionDetected()
+                   ? "YES"
+                   : "NO";
+
+    message += "\nGPS: ";
+    message += GpsManager::hasValidFix()
+                   ? "FIX"
+                   : "NO FIX";
+
+    message += "\nSAT: ";
+    message += String(
+        GpsManager::getSatelliteCount());
+
+    return message;
+}
+
+String buildCommandReply(
+    RemoteCommand command,
+    CommandResult result)
+{
+    String reply = "COMMAND: ";
+    reply += commandToText(command);
+
+    reply += "\nRESULT: ";
+    reply += result == CommandResult::SUCCESS
+                 ? "SUCCESS"
+                 : "FAILED";
+
+    reply += "\nSTATE: ";
+    reply += StateMachine::getStateText();
+
+    return reply;
+}
+
+void processSmsRequests()
+{
+    SmsRequestType request =
+        SmsRequestType::NONE;
+
+    if (!SmsManager::getPendingRequest(request)) {
+        return;
+    }
+
+    if (request == SmsRequestType::STATUS) {
+        SmsManager::queueMessage(
+            buildStatusMessage());
+        return;
+    }
+
+    if (request == SmsRequestType::LOCATION) {
+        SmsManager::queueMessage(
+            GpsManager::getGoogleMapsUrl());
+        return;
+    }
+
+    const RemoteCommand command =
+        smsRequestToRemoteCommand(request);
+
+    if (command == RemoteCommand::NONE) {
+        SmsManager::queueMessage(
+            "INVALID COMMAND");
+        return;
+    }
+
+    const CommandResult result =
+        StateMachine::handleCommand(command);
+
+    SmsManager::queueMessage(
+        buildCommandReply(command, result));
+}
+
+void queueAlarmSmsOnStateTransition()
+{
+    static SystemState previousState =
+        SystemState::DISARMED;
+
+    const SystemState currentState =
+        StateMachine::getState();
+
+    if (currentState == SystemState::ALARM &&
+        previousState != SystemState::ALARM) {
+        String message = "THEFT ALERT";
+
+        message += "\nREASON: ";
+        message +=
+            StateMachine::getAlarmReasonText();
+
+        message += "\n";
+        message += GpsManager::getGoogleMapsUrl();
+
+        SmsManager::queueMessage(message);
+    }
+
+    previousState = currentState;
+}
+
 void setup()
 {
     Serial.begin(MainConfig::DEBUG_BAUD);
@@ -37,24 +166,26 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 6");
+    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 7");
     Serial.println("======================================");
 
     OutputController::begin();
     VehicleInputs::begin();
     MotionSensor::begin();
     GpsManager::begin();
+    SmsManager::begin();
     StateMachine::begin();
     EspNowManager::begin();
 
-    Serial.println("Phase 6 initialization completed.");
+    Serial.println("Phase 7 initialization completed.");
 }
 
 void loop()
 {
     VehicleInputs::update();
-    EspNowManager::update();
     GpsManager::update();
+    SmsManager::update();
+    EspNowManager::update();
 
     MotionSensor::setMonitoringEnabled(
         StateMachine::isAntiTheftArmed());
@@ -68,24 +199,26 @@ void loop()
 
     StateMachine::update(alarmInputs);
 
-    RemoteCommand command = RemoteCommand::NONE;
+    RemoteCommand espNowCommand =
+        RemoteCommand::NONE;
     uint32_t packetId = 0;
 
     if (EspNowManager::getPendingCommand(
-            command,
+            espNowCommand,
             packetId)) {
-        Serial.print("[MAIN] Received command: ");
-        Serial.println(commandToText(command));
-
         const CommandResult result =
-            StateMachine::handleCommand(command);
+            StateMachine::handleCommand(
+                espNowCommand);
 
         EspNowManager::sendResponse(
             packetId,
-            command,
+            espNowCommand,
             result,
             StateMachine::getState());
     }
+
+    processSmsRequests();
+    queueAlarmSmsOnStateTransition();
 
     static uint32_t lastPrintAt = 0;
     const uint32_t now = millis();
@@ -103,49 +236,35 @@ void loop()
                 ? "ON"
                 : "OFF");
 
-        Serial.print(" | MPU=");
-        Serial.print(
-            MotionSensor::isAvailable()
-                ? "OK"
-                : "FAIL");
-
         Serial.print(" | Motion=");
         Serial.print(
             MotionSensor::isMotionDetected()
                 ? "YES"
                 : "NO");
 
-        Serial.print(" | GPS data=");
-        Serial.print(
-            GpsManager::isReceivingData()
-                ? "YES"
-                : "NO");
-
-        Serial.print(" | GPS fix=");
+        Serial.print(" | GPS=");
         Serial.print(
             GpsManager::hasValidFix()
-                ? "YES"
-                : "NO");
+                ? "FIX"
+                : "NO FIX");
 
-        Serial.print(" | Satellites=");
+        Serial.print(" | GSM=");
         Serial.print(
-            GpsManager::getSatelliteCount());
+            SmsManager::isReady()
+                ? "READY"
+                : "NOT READY");
 
-        Serial.print(" | GPS chars=");
+        Serial.print(" | SMS RX=");
         Serial.print(
-            GpsManager::getCharactersProcessed());
+            SmsManager::getReceivedSmsCount());
 
-        if (GpsManager::hasValidFix()) {
-            Serial.print(" | Lat=");
-            Serial.print(
-                GpsManager::getLatitude(),
-                6);
+        Serial.print(" | SMS TX=");
+        Serial.print(
+            SmsManager::getSentSmsCount());
 
-            Serial.print(" | Lng=");
-            Serial.print(
-                GpsManager::getLongitude(),
-                6);
-        }
+        Serial.print(" | SMS FAIL=");
+        Serial.print(
+            SmsManager::getFailedSmsCount());
 
         Serial.print(" | StarterLock=");
         Serial.print(

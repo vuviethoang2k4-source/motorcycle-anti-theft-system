@@ -6,11 +6,11 @@ namespace MainConfig {
 
 namespace Pin {
 
-constexpr uint8_t GPS_TX = 12;  // ESP32 TX -> RX của GPS
-constexpr uint8_t GPS_RX = 13;  // ESP32 RX <- TX của GPS
+constexpr uint8_t GPS_TX = 12;
+constexpr uint8_t GPS_RX = 13;
 
-constexpr uint8_t GSM_RX = 16;
-constexpr uint8_t GSM_TX = 17;
+constexpr uint8_t GSM_RX = 16;  // ESP32 RX <- TX A7680C
+constexpr uint8_t GSM_TX = 17;  // ESP32 TX -> RX A7680C
 
 constexpr uint8_t MPU_SDA = 21;
 constexpr uint8_t MPU_SCL = 22;
@@ -52,17 +52,17 @@ constexpr uint32_t MOTION_SAMPLE_INTERVAL_MS = 20;
 constexpr uint16_t MOTION_BASELINE_SAMPLES = 75;
 constexpr uint32_t MOTION_CONFIRM_MS = 250;
 
-/*
- * GPS được coi là đang có dữ liệu khi mới nhận byte NMEA
- * trong khoảng thời gian này.
- */
 constexpr uint32_t GPS_DATA_TIMEOUT_MS = 3000;
+constexpr uint32_t GPS_FIX_MAX_AGE_MS = 15000;
 
 /*
- * Tọa độ chỉ được coi là còn mới khi tuổi dữ liệu nhỏ hơn
- * hoặc bằng giá trị này.
+ * Cho A7680C có thời gian hoàn tất quá trình khởi động
+ * trước khi gửi lệnh AT đầu tiên.
  */
-constexpr uint32_t GPS_FIX_MAX_AGE_MS = 15000;
+constexpr uint32_t GSM_BOOT_WAIT_MS = 5000;
+constexpr uint32_t GSM_AT_TIMEOUT_MS = 3000;
+constexpr uint32_t GSM_SMS_SEND_TIMEOUT_MS = 20000;
+constexpr uint32_t GSM_RETRY_INTERVAL_MS = 3000;
 
 constexpr uint32_t FIND_DURATION_MS = 6000;
 constexpr uint32_t FIND_SIREN_PERIOD_MS = 1000;
@@ -85,6 +85,8 @@ constexpr float TILT_THRESHOLD_DEG = 12.0F;
 
 constexpr uint32_t DEBUG_BAUD = 115200;
 constexpr uint32_t GPS_BAUD = 9600;
+constexpr uint32_t GSM_BAUD = 115200;
+
 constexpr uint8_t ESPNOW_CHANNEL = 6;
 constexpr uint32_t I2C_FREQUENCY_HZ = 400000;
 
