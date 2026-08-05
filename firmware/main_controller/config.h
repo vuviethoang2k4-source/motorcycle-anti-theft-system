@@ -31,6 +31,13 @@ constexpr uint8_t ACC_OFF = HIGH;
 namespace Timing {
 constexpr uint32_t ACC_DEBOUNCE_MS = 100;
 constexpr uint32_t DEBUG_PRINT_INTERVAL_MS = 1000;
+constexpr uint32_t FIND_DURATION_MS = 6000;
+constexpr uint32_t FIND_SIREN_PERIOD_MS = 1000;
+constexpr uint32_t FIND_SIREN_ON_MS = 120;
+constexpr uint32_t TURN_SIGNAL_PERIOD_MS = 500;
+constexpr uint32_t TURN_SIGNAL_ON_MS = 250;
+constexpr uint32_t ALARM_SIREN_PERIOD_MS = 1500;
+constexpr uint32_t ALARM_SIREN_ON_MS = 1000;
 }
 
 constexpr uint32_t DEBUG_BAUD = 115200;
