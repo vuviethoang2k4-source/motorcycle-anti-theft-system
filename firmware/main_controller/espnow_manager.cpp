@@ -15,12 +15,22 @@
 namespace EspNowManager {
 namespace {
 
-portMUX_TYPE receiveMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE receiveMux =
+    portMUX_INITIALIZER_UNLOCKED;
 
 RemoteCommandPacket receivedPacket{};
 volatile bool packetPending = false;
 
 bool managerReady = false;
+
+/*
+ * Bộ nhớ ACK gần nhất:
+ * - remote gửi lại cùng packetId khi chưa nhận được ACK;
+ * - mạch trung tâm gửi lại response này;
+ * - không đưa lệnh lặp ra main_controller.ino.
+ */
+bool cachedResponseValid = false;
+ControllerResponsePacket cachedResponse{};
 
 bool isZeroMac(const uint8_t *mac)
 {
@@ -53,8 +63,10 @@ public:
         const ControllerResponsePacket &response)
     {
         return send(
-                   reinterpret_cast<const uint8_t *>(&response),
-                   sizeof(response)) == sizeof(response);
+                   reinterpret_cast<const uint8_t *>(
+                       &response),
+                   sizeof(response)) ==
+               sizeof(response);
     }
 
     void onReceive(
@@ -64,65 +76,112 @@ public:
     {
         (void)broadcast;
 
-        if (length != sizeof(RemoteCommandPacket)) {
+        if (length !=
+            sizeof(RemoteCommandPacket)) {
             return;
         }
 
         portENTER_CRITICAL(&receiveMux);
+
         memcpy(
             &receivedPacket,
             data,
             sizeof(RemoteCommandPacket));
+
         packetPending = true;
+
         portEXIT_CRITICAL(&receiveMux);
     }
 
     void onSent(bool success) override
     {
-        Serial.print("[ESP-NOW MAIN] ACK transmit: ");
-        Serial.println(success ? "SUCCESS" : "FAILED");
+        Serial.print(
+            "[ESP-NOW MAIN] ACK transmit: ");
+
+        Serial.println(
+            success ? "SUCCESS" : "FAILED");
     }
 };
 
 RemotePeer remotePeer(REMOTE_MAC_ADDRESS);
 
-bool copyPendingPacket(RemoteCommandPacket &packet)
+bool copyPendingPacket(
+    RemoteCommandPacket &packet)
 {
     if (!packetPending) {
         return false;
     }
 
     portENTER_CRITICAL(&receiveMux);
-    memcpy(&packet, &receivedPacket, sizeof(packet));
+
+    memcpy(
+        &packet,
+        &receivedPacket,
+        sizeof(packet));
+
     packetPending = false;
+
     portEXIT_CRITICAL(&receiveMux);
 
     return true;
 }
 
+bool isDuplicateOfCachedResponse(
+    const RemoteCommandPacket &packet)
+{
+    return cachedResponseValid &&
+           cachedResponse.packetId ==
+               packet.packetId &&
+           cachedResponse.command ==
+               packet.command;
 }
+
+bool resendCachedResponse()
+{
+    if (!managerReady ||
+        !cachedResponseValid) {
+        return false;
+    }
+
+    Serial.print(
+        "[ESP-NOW MAIN] Duplicate packet ");
+    Serial.print(cachedResponse.packetId);
+    Serial.println(
+        ", resend cached ACK without executing command.");
+
+    return remotePeer.sendPacket(
+        cachedResponse);
+}
+
+}  // namespace
 
 bool begin()
 {
     WiFi.mode(WIFI_STA);
-    WiFi.setChannel(MainConfig::ESPNOW_CHANNEL);
+    WiFi.setChannel(
+        MainConfig::ESPNOW_CHANNEL);
 
     while (!WiFi.STA.started()) {
         delay(10);
     }
 
-    Serial.print("[ESP-NOW MAIN] Local MAC: ");
+    Serial.print(
+        "[ESP-NOW MAIN] Local MAC: ");
     Serial.println(WiFi.macAddress());
 
     if (!ESP_NOW.begin()) {
-        Serial.println("[ESP-NOW MAIN] Initialization failed.");
+        Serial.println(
+            "[ESP-NOW MAIN] Initialization failed.");
+
         managerReady = false;
         return false;
     }
 
-    if (isZeroMac(REMOTE_MAC_ADDRESS)) {
+    if (isZeroMac(
+            REMOTE_MAC_ADDRESS)) {
         Serial.println(
             "[ESP-NOW MAIN] Remote MAC is not configured.");
+
         managerReady = false;
         return false;
     }
@@ -130,15 +189,21 @@ bool begin()
     if (!remotePeer.registerPeer()) {
         Serial.println(
             "[ESP-NOW MAIN] Cannot register remote peer.");
+
         managerReady = false;
         return false;
     }
 
     managerReady = true;
+    cachedResponseValid = false;
 
-    Serial.print("[ESP-NOW MAIN] Channel: ");
-    Serial.println(MainConfig::ESPNOW_CHANNEL);
-    Serial.println("[ESP-NOW MAIN] Ready.");
+    Serial.print(
+        "[ESP-NOW MAIN] Channel: ");
+    Serial.println(
+        MainConfig::ESPNOW_CHANNEL);
+
+    Serial.println(
+        "[ESP-NOW MAIN] Ready.");
 
     return true;
 }
@@ -147,7 +212,7 @@ void update()
 {
     /*
      * Callback chỉ chép dữ liệu vào bộ đệm.
-     * Việc xử lý lệnh diễn ra trong loop() qua getPendingCommand().
+     * Việc xác thực và xử lý diễn ra trong loop().
      */
 }
 
@@ -166,7 +231,8 @@ bool getPendingCommand(
         return false;
     }
 
-    if (!isSupportedCommand(packet.command)) {
+    if (!isSupportedCommand(
+            packet.command)) {
         sendResponse(
             packet.packetId,
             RemoteCommand::NONE,
@@ -175,6 +241,7 @@ bool getPendingCommand(
 
         Serial.println(
             "[ESP-NOW MAIN] Invalid command.");
+
         return false;
     }
 
@@ -184,20 +251,35 @@ bool getPendingCommand(
             packet.packetId,
             packet.command);
 
-    if (packet.authenticationCode != expectedCode) {
+    if (packet.authenticationCode !=
+        expectedCode) {
         sendResponse(
             packet.packetId,
-            static_cast<RemoteCommand>(packet.command),
-            CommandResult::AUTHENTICATION_ERROR,
+            static_cast<RemoteCommand>(
+                packet.command),
+            CommandResult::
+                AUTHENTICATION_ERROR,
             SystemState::DISARMED);
 
         Serial.println(
             "[ESP-NOW MAIN] Authentication error.");
+
+        return false;
+    }
+
+    /*
+     * Chỉ kiểm tra trùng sau khi xác thực thành công.
+     */
+    if (isDuplicateOfCachedResponse(
+            packet)) {
+        resendCachedResponse();
         return false;
     }
 
     command =
-        static_cast<RemoteCommand>(packet.command);
+        static_cast<RemoteCommand>(
+            packet.command);
+
     packetId = packet.packetId;
 
     return true;
@@ -221,9 +303,18 @@ bool sendResponse(
     response.result =
         static_cast<uint8_t>(result);
     response.systemState =
-        static_cast<uint8_t>(currentState);
+        static_cast<uint8_t>(
+            currentState);
+
+    /*
+     * Lưu trước khi gửi.
+     * Nếu ACK bị mất trên đường truyền, remote gửi lại
+     * và mạch trung tâm vẫn có response để trả lại.
+     */
+    cachedResponse = response;
+    cachedResponseValid = true;
 
     return remotePeer.sendPacket(response);
 }
 
-}
+}  // namespace EspNowManager

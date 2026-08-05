@@ -1,6 +1,7 @@
 #include "espnow_remote.h"
 
 #include <Arduino.h>
+#include <Preferences.h>
 #include <WiFi.h>
 #include "ESP32_NOW.h"
 
@@ -15,7 +16,8 @@
 namespace EspNowRemote {
 namespace {
 
-portMUX_TYPE responseMux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE responseMux =
+    portMUX_INITIALIZER_UNLOCKED;
 
 ControllerResponsePacket receivedResponse{};
 volatile bool responsePending = false;
@@ -25,13 +27,33 @@ bool waitingForAck = false;
 bool resultAvailable = false;
 
 RemoteCommandPacket activePacket{};
+
 uint8_t sendAttempt = 0;
 uint32_t lastSendAt = 0;
-uint32_t packetCounter = 1;
 
-RemoteCommand completedCommand = RemoteCommand::NONE;
-CommandResult completedResult = CommandResult::INVALID;
-SystemState completedState = SystemState::DISARMED;
+RemoteCommand completedCommand =
+    RemoteCommand::NONE;
+
+CommandResult completedResult =
+    CommandResult::INVALID;
+
+SystemState completedState =
+    SystemState::DISARMED;
+
+/*
+ * Packet ID được lưu trong NVS để sau khi remote mất nguồn
+ * vẫn tiếp tục tăng, thay vì quay lại từ 1.
+ */
+Preferences packetPreferences;
+
+constexpr char PACKET_NAMESPACE[] =
+    "remote";
+
+constexpr char PACKET_KEY[] =
+    "packet";
+
+bool packetStorageReady = false;
+uint32_t packetCounter = 0;
 
 bool isZeroMac(const uint8_t *mac)
 {
@@ -44,9 +66,33 @@ bool isZeroMac(const uint8_t *mac)
     return true;
 }
 
+uint32_t createNextPacketId()
+{
+    ++packetCounter;
+
+    if (packetCounter == 0) {
+        packetCounter = 1;
+    }
+
+    if (packetStorageReady) {
+        const size_t bytesWritten =
+            packetPreferences.putUInt(
+                PACKET_KEY,
+                packetCounter);
+
+        if (bytesWritten == 0) {
+            Serial.println(
+                "[ESP-NOW REMOTE] Cannot persist packet ID.");
+        }
+    }
+
+    return packetCounter;
+}
+
 class MainPeer : public ESP_NOW_Peer {
 public:
-    explicit MainPeer(const uint8_t *macAddress)
+    explicit MainPeer(
+        const uint8_t *macAddress)
         : ESP_NOW_Peer(
               macAddress,
               RemoteConfig::ESPNOW_CHANNEL,
@@ -64,8 +110,10 @@ public:
         const RemoteCommandPacket &packet)
     {
         return send(
-                   reinterpret_cast<const uint8_t *>(&packet),
-                   sizeof(packet)) == sizeof(packet);
+                   reinterpret_cast<const uint8_t *>(
+                       &packet),
+                   sizeof(packet)) ==
+               sizeof(packet);
     }
 
     void onReceive(
@@ -75,27 +123,35 @@ public:
     {
         (void)broadcast;
 
-        if (length != sizeof(ControllerResponsePacket)) {
+        if (length !=
+            sizeof(ControllerResponsePacket)) {
             return;
         }
 
         portENTER_CRITICAL(&responseMux);
+
         memcpy(
             &receivedResponse,
             data,
             sizeof(ControllerResponsePacket));
+
         responsePending = true;
+
         portEXIT_CRITICAL(&responseMux);
     }
 
     void onSent(bool success) override
     {
-        Serial.print("[ESP-NOW REMOTE] Packet transmit: ");
-        Serial.println(success ? "SUCCESS" : "FAILED");
+        Serial.print(
+            "[ESP-NOW REMOTE] Packet transmit: ");
+
+        Serial.println(
+            success ? "SUCCESS" : "FAILED");
     }
 };
 
-MainPeer mainPeer(MAIN_CONTROLLER_MAC_ADDRESS);
+MainPeer mainPeer(
+    MAIN_CONTROLLER_MAC_ADDRESS);
 
 bool copyPendingResponse(
     ControllerResponsePacket &response)
@@ -105,8 +161,14 @@ bool copyPendingResponse(
     }
 
     portENTER_CRITICAL(&responseMux);
-    memcpy(&response, &receivedResponse, sizeof(response));
+
+    memcpy(
+        &response,
+        &receivedResponse,
+        sizeof(response));
+
     responsePending = false;
+
     portEXIT_CRITICAL(&responseMux);
 
     return true;
@@ -117,7 +179,9 @@ void finishCommand(
     SystemState state)
 {
     completedCommand =
-        static_cast<RemoteCommand>(activePacket.command);
+        static_cast<RemoteCommand>(
+            activePacket.command);
+
     completedResult = result;
     completedState = state;
 
@@ -130,38 +194,74 @@ bool transmitActivePacket()
     ++sendAttempt;
     lastSendAt = millis();
 
-    Serial.print("[ESP-NOW REMOTE] Send attempt ");
+    Serial.print(
+        "[ESP-NOW REMOTE] Send attempt ");
     Serial.print(sendAttempt);
+
     Serial.print(", packetId=");
     Serial.println(activePacket.packetId);
 
-    return mainPeer.sendPacket(activePacket);
+    return mainPeer.sendPacket(
+        activePacket);
 }
 
+void initializePacketStorage()
+{
+    packetStorageReady =
+        packetPreferences.begin(
+            PACKET_NAMESPACE,
+            false);
+
+    if (!packetStorageReady) {
+        packetCounter = 0;
+
+        Serial.println(
+            "[ESP-NOW REMOTE] Packet NVS unavailable.");
+
+        return;
+    }
+
+    packetCounter =
+        packetPreferences.getUInt(
+            PACKET_KEY,
+            0);
+
+    Serial.print(
+        "[ESP-NOW REMOTE] Restored packet ID: ");
+    Serial.println(packetCounter);
 }
+
+}  // namespace
 
 bool begin()
 {
+    initializePacketStorage();
+
     WiFi.mode(WIFI_STA);
-    WiFi.setChannel(RemoteConfig::ESPNOW_CHANNEL);
+    WiFi.setChannel(
+        RemoteConfig::ESPNOW_CHANNEL);
 
     while (!WiFi.STA.started()) {
         delay(10);
     }
 
-    Serial.print("[ESP-NOW REMOTE] Local MAC: ");
+    Serial.print(
+        "[ESP-NOW REMOTE] Local MAC: ");
     Serial.println(WiFi.macAddress());
 
     if (!ESP_NOW.begin()) {
         Serial.println(
             "[ESP-NOW REMOTE] Initialization failed.");
+
         managerReady = false;
         return false;
     }
 
-    if (isZeroMac(MAIN_CONTROLLER_MAC_ADDRESS)) {
+    if (isZeroMac(
+            MAIN_CONTROLLER_MAC_ADDRESS)) {
         Serial.println(
             "[ESP-NOW REMOTE] Main MAC is not configured.");
+
         managerReady = false;
         return false;
     }
@@ -169,15 +269,20 @@ bool begin()
     if (!mainPeer.registerPeer()) {
         Serial.println(
             "[ESP-NOW REMOTE] Cannot register main peer.");
+
         managerReady = false;
         return false;
     }
 
     managerReady = true;
 
-    Serial.print("[ESP-NOW REMOTE] Channel: ");
-    Serial.println(RemoteConfig::ESPNOW_CHANNEL);
-    Serial.println("[ESP-NOW REMOTE] Ready.");
+    Serial.print(
+        "[ESP-NOW REMOTE] Channel: ");
+    Serial.println(
+        RemoteConfig::ESPNOW_CHANNEL);
+
+    Serial.println(
+        "[ESP-NOW REMOTE] Ready.");
 
     return true;
 }
@@ -191,31 +296,43 @@ void update()
     ControllerResponsePacket response{};
 
     if (copyPendingResponse(response)) {
-        if (response.packetId != activePacket.packetId ||
-            response.command != activePacket.command) {
+        if (response.packetId !=
+                activePacket.packetId ||
+            response.command !=
+                activePacket.command) {
             Serial.println(
                 "[ESP-NOW REMOTE] Ignore unmatched ACK.");
         } else {
             finishCommand(
-                static_cast<CommandResult>(response.result),
-                static_cast<SystemState>(response.systemState));
+                static_cast<CommandResult>(
+                    response.result),
+                static_cast<SystemState>(
+                    response.systemState));
+
             return;
         }
     }
 
     if (millis() - lastSendAt <
-        RemoteConfig::Timing::ACK_TIMEOUT_MS) {
+        RemoteConfig::Timing::
+            ACK_TIMEOUT_MS) {
         return;
     }
 
     if (sendAttempt <
-        RemoteConfig::Timing::MAX_SEND_ATTEMPTS) {
+        RemoteConfig::Timing::
+            MAX_SEND_ATTEMPTS) {
+        /*
+         * Gửi lại đúng activePacket:
+         * packetId và authenticationCode không đổi.
+         */
         transmitActivePacket();
         return;
     }
 
     Serial.println(
         "[ESP-NOW REMOTE] ACK timeout.");
+
     finishCommand(
         CommandResult::BUSY,
         SystemState::DISARMED);
@@ -231,7 +348,8 @@ bool isBusy()
     return waitingForAck;
 }
 
-bool requestCommand(RemoteCommand command)
+bool requestCommand(
+    RemoteCommand command)
 {
     if (!managerReady ||
         waitingForAck ||
@@ -239,11 +357,8 @@ bool requestCommand(RemoteCommand command)
         return false;
     }
 
-    activePacket.packetId = packetCounter++;
-
-    if (packetCounter == 0) {
-        packetCounter = 1;
-    }
+    activePacket.packetId =
+        createNextPacketId();
 
     activePacket.command =
         static_cast<uint8_t>(command);
@@ -281,7 +396,8 @@ bool getLastResult(
     systemState = completedState;
 
     resultAvailable = false;
+
     return true;
 }
 
-}
+}  // namespace EspNowRemote
