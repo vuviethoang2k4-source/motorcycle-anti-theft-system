@@ -5,16 +5,26 @@
 #include "output_controller.h"
 #include "protocol.h"
 #include "state_machine.h"
+#include "system_types.h"
 #include "vehicle_inputs.h"
 
 const char *commandToText(RemoteCommand command)
 {
     switch (command) {
-        case RemoteCommand::ARM: return "ARM";
-        case RemoteCommand::DISARM: return "DISARM";
-        case RemoteCommand::FIND: return "FIND";
-        case RemoteCommand::SILENCE: return "SILENCE";
-        default: return "NONE";
+        case RemoteCommand::ARM:
+            return "ARM";
+
+        case RemoteCommand::DISARM:
+            return "DISARM";
+
+        case RemoteCommand::FIND:
+            return "FIND";
+
+        case RemoteCommand::SILENCE:
+            return "SILENCE";
+
+        default:
+            return "NONE";
     }
 }
 
@@ -25,7 +35,7 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 3");
+    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 4");
     Serial.println("======================================");
 
     OutputController::begin();
@@ -33,19 +43,26 @@ void setup()
     StateMachine::begin();
     EspNowManager::begin();
 
-    Serial.println("Phase 3 initialization completed.");
+    Serial.println("Phase 4 initialization completed.");
 }
 
 void loop()
 {
     VehicleInputs::update();
     EspNowManager::update();
-    StateMachine::update();
+
+    AlarmInputs alarmInputs;
+    alarmInputs.accOn = VehicleInputs::isAccOn();
+    alarmInputs.motionDetected = false;
+
+    StateMachine::update(alarmInputs);
 
     RemoteCommand command = RemoteCommand::NONE;
     uint32_t packetId = 0;
 
-    if (EspNowManager::getPendingCommand(command, packetId)) {
+    if (EspNowManager::getPendingCommand(
+            command,
+            packetId)) {
         Serial.print("[MAIN] Received command: ");
         Serial.println(commandToText(command));
 
@@ -79,15 +96,21 @@ void loop()
 
         Serial.print(" | StarterLock=");
         Serial.print(
-            OutputController::isStarterLocked() ? "ON" : "OFF");
+            OutputController::isStarterLocked()
+                ? "ON"
+                : "OFF");
 
         Serial.print(" | Siren=");
         Serial.print(
-            OutputController::isSirenEnabled() ? "ON" : "OFF");
+            OutputController::isSirenEnabled()
+                ? "ON"
+                : "OFF");
 
         Serial.print(" | Turn=");
         Serial.println(
-            OutputController::isTurnSignalEnabled() ? "ON" : "OFF");
+            OutputController::isTurnSignalEnabled()
+                ? "ON"
+                : "OFF");
     }
 
     delay(1);
