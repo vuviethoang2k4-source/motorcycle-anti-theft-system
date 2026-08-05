@@ -1,9 +1,0 @@
-#ifndef REMOTE_CONTROLLER_SECRETS_EXAMPLE_H
-#define REMOTE_CONTROLLER_SECRETS_EXAMPLE_H
-
-// Địa chỉ MAC của ESP32 DevKit V1 trên xe
-const uint8_t MAIN_CONTROLLER_MAC_ADDRESS[6] = {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
-
-#endif
