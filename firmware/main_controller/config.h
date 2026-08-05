@@ -45,16 +45,12 @@ namespace Timing {
 constexpr uint32_t ACC_DEBOUNCE_MS = 100;
 constexpr uint32_t DEBUG_PRINT_INTERVAL_MS = 1000;
 
-/*
- * ACC phải duy trì ON đủ thời gian này mới được coi là xâm nhập.
- */
 constexpr uint32_t ACC_ALARM_CONFIRM_MS = 300;
-
-/*
- * Sau khi SILENCE, ACC phải OFF liên tục đủ thời gian này
- * thì hệ thống mới trở về ARMED và cho phép báo động lần sau.
- */
 constexpr uint32_t ALARM_INPUT_CLEAR_MS = 2000;
+
+constexpr uint32_t MOTION_SAMPLE_INTERVAL_MS = 20;
+constexpr uint16_t MOTION_BASELINE_SAMPLES = 75;
+constexpr uint32_t MOTION_CONFIRM_MS = 250;
 
 constexpr uint32_t FIND_DURATION_MS = 6000;
 constexpr uint32_t FIND_SIREN_PERIOD_MS = 1000;
@@ -68,7 +64,19 @@ constexpr uint32_t ALARM_SIREN_ON_MS = 1000;
 
 }  // namespace Timing
 
+namespace Motion {
+
+/*
+ * Ngưỡng ban đầu để chạy thử.
+ * Sau này cần hiệu chỉnh trên xe thực tế.
+ */
+constexpr float VIBRATION_THRESHOLD_MS2 = 2.2F;
+constexpr float TILT_THRESHOLD_DEG = 12.0F;
+
+}  // namespace Motion
+
 constexpr uint32_t DEBUG_BAUD = 115200;
 constexpr uint8_t ESPNOW_CHANNEL = 6;
+constexpr uint32_t I2C_FREQUENCY_HZ = 400000;
 
 }  // namespace MainConfig

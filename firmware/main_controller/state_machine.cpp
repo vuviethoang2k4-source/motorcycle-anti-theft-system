@@ -61,9 +61,6 @@ bool waitingForNewAlarm()
         return true;
     }
 
-    /*
-     * FIND khởi động từ ARMED vẫn phải tiếp tục theo dõi ACC.
-     */
     return currentState == SystemState::FINDING &&
            stateBeforeFinding == SystemState::ARMED;
 }
@@ -84,7 +81,7 @@ void applyStarterLock()
         requiresStarterLock(currentState));
 }
 
-void resetAlarmInputTimers()
+void resetAlarmTimers()
 {
     accActiveSince = 0;
     alarmInputClearSince = 0;
@@ -95,7 +92,7 @@ void enterDisarmed()
     currentState = SystemState::DISARMED;
     stateBeforeFinding = SystemState::DISARMED;
 
-    resetAlarmInputTimers();
+    resetAlarmTimers();
 
     OutputController::setStarterLocked(false);
     OutputController::stopWarningOutputs();
@@ -108,7 +105,7 @@ void enterArmed()
     currentState = SystemState::ARMED;
     stateBeforeFinding = SystemState::ARMED;
 
-    resetAlarmInputTimers();
+    resetAlarmTimers();
 
     OutputController::setStarterLocked(true);
     OutputController::stopWarningOutputs();
@@ -121,8 +118,7 @@ void enterAlarm(const char *reason)
     currentState = SystemState::ALARM;
     stateBeforeFinding = SystemState::ALARM;
 
-    accActiveSince = 0;
-    alarmInputClearSince = 0;
+    resetAlarmTimers();
 
     OutputController::setStarterLocked(true);
 
@@ -166,25 +162,30 @@ void silenceWarnings()
 
 void updateFinding()
 {
-    const uint32_t elapsed = millis() - findingStartedAt;
+    const uint32_t elapsed =
+        millis() - findingStartedAt;
 
-    if (elapsed >= MainConfig::Timing::FIND_DURATION_MS) {
+    if (elapsed >=
+        MainConfig::Timing::FIND_DURATION_MS) {
         OutputController::stopWarningOutputs();
 
         currentState = stateBeforeFinding;
         applyStarterLock();
 
-        Serial.print("[STATE] FIND completed, return to ");
+        Serial.print(
+            "[STATE] FIND completed, return to ");
         Serial.println(stateToText(currentState));
         return;
     }
 
     const bool sirenOn =
-        elapsed % MainConfig::Timing::FIND_SIREN_PERIOD_MS <
+        elapsed %
+            MainConfig::Timing::FIND_SIREN_PERIOD_MS <
         MainConfig::Timing::FIND_SIREN_ON_MS;
 
     const bool turnOn =
-        elapsed % MainConfig::Timing::TURN_SIGNAL_PERIOD_MS <
+        elapsed %
+            MainConfig::Timing::TURN_SIGNAL_PERIOD_MS <
         MainConfig::Timing::TURN_SIGNAL_ON_MS;
 
     OutputController::setSiren(sirenOn);
@@ -196,66 +197,85 @@ void updateAlarmPattern()
     const uint32_t elapsed = millis();
 
     const bool sirenOn =
-        elapsed % MainConfig::Timing::ALARM_SIREN_PERIOD_MS <
+        elapsed %
+            MainConfig::Timing::ALARM_SIREN_PERIOD_MS <
         MainConfig::Timing::ALARM_SIREN_ON_MS;
 
     const bool turnOn =
-        elapsed % MainConfig::Timing::TURN_SIGNAL_PERIOD_MS <
+        elapsed %
+            MainConfig::Timing::TURN_SIGNAL_PERIOD_MS <
         MainConfig::Timing::TURN_SIGNAL_ON_MS;
 
     OutputController::setSiren(sirenOn);
     OutputController::setTurnSignal(turnOn);
 }
 
-void processAccAlarm(bool accOn)
+void processSilencedState(
+    const AlarmInputs &inputs)
 {
-    const uint32_t now = millis();
+    const bool anyInputActive =
+        inputs.accOn ||
+        inputs.motionDetected;
 
-    /*
-     * Khi DISARMED, ACC không được phép kích hoạt cảnh báo.
-     */
-    if (currentState == SystemState::DISARMED) {
-        resetAlarmInputTimers();
+    if (anyInputActive) {
+        alarmInputClearSince = 0;
         return;
     }
 
-    /*
-     * ALARM đã được chốt. ACC tắt không tự dừng còi;
-     * cần lệnh SILENCE hoặc DISARM.
-     */
+    if (alarmInputClearSince == 0) {
+        alarmInputClearSince = millis();
+        return;
+    }
+
+    if (millis() - alarmInputClearSince <
+        MainConfig::Timing::ALARM_INPUT_CLEAR_MS) {
+        return;
+    }
+
+    if (currentState == SystemState::SILENCED) {
+        currentState = SystemState::ARMED;
+    } else {
+        stateBeforeFinding = SystemState::ARMED;
+    }
+
+    alarmInputClearSince = 0;
+
+    Serial.println(
+        "[STATE] Alarm inputs cleared, return to ARMED.");
+}
+
+void processAccAlarm(bool accOn)
+{
+    if (!accOn) {
+        accActiveSince = 0;
+        return;
+    }
+
+    if (accActiveSince == 0) {
+        accActiveSince = millis();
+        return;
+    }
+
+    if (millis() - accActiveSince >=
+        MainConfig::Timing::ACC_ALARM_CONFIRM_MS) {
+        enterAlarm("ACC");
+    }
+}
+
+void processAlarmInputs(
+    const AlarmInputs &inputs)
+{
+    if (currentState == SystemState::DISARMED) {
+        resetAlarmTimers();
+        return;
+    }
+
     if (currentState == SystemState::ALARM) {
         return;
     }
 
-    /*
-     * Sau SILENCE, đợi ACC OFF ổn định rồi mới quay về ARMED.
-     * Điều này tránh còi bật lại ngay khi người dùng vừa tắt còi.
-     */
     if (alarmIsSilenced()) {
-        if (accOn) {
-            alarmInputClearSince = 0;
-            return;
-        }
-
-        if (alarmInputClearSince == 0) {
-            alarmInputClearSince = now;
-            return;
-        }
-
-        if (now - alarmInputClearSince >=
-            MainConfig::Timing::ALARM_INPUT_CLEAR_MS) {
-            if (currentState == SystemState::SILENCED) {
-                currentState = SystemState::ARMED;
-            } else {
-                stateBeforeFinding = SystemState::ARMED;
-            }
-
-            alarmInputClearSince = 0;
-
-            Serial.println(
-                "[STATE] Alarm input cleared, return to ARMED.");
-        }
-
+        processSilencedState(inputs);
         return;
     }
 
@@ -264,36 +284,28 @@ void processAccAlarm(bool accOn)
         return;
     }
 
-    if (!accOn) {
-        accActiveSince = 0;
+    /*
+     * MotionSensor đã xác nhận rung/nghiêng đủ thời gian,
+     * nên có thể kích hoạt báo động ngay tại đây.
+     */
+    if (inputs.motionDetected) {
+        enterAlarm("VIBRATION OR TILT");
         return;
     }
 
-    if (accActiveSince == 0) {
-        accActiveSince = now;
-        return;
-    }
-
-    if (now - accActiveSince >=
-        MainConfig::Timing::ACC_ALARM_CONFIRM_MS) {
-        enterAlarm("ACC");
-    }
+    processAccAlarm(inputs.accOn);
 }
 
 }  // namespace
 
 void begin()
 {
-    /*
-     * Chưa lưu trạng thái bằng NVS ở mốc này.
-     * Cấp nguồn lại sẽ bắt đầu từ DISARMED.
-     */
     enterDisarmed();
 }
 
 void update(const AlarmInputs &inputs)
 {
-    processAccAlarm(inputs.accOn);
+    processAlarmInputs(inputs);
     applyStarterLock();
 
     switch (currentState) {
@@ -305,9 +317,6 @@ void update(const AlarmInputs &inputs)
             updateAlarmPattern();
             break;
 
-        case SystemState::DISARMED:
-        case SystemState::ARMED:
-        case SystemState::SILENCED:
         default:
             OutputController::stopWarningOutputs();
             break;
@@ -333,7 +342,6 @@ CommandResult handleCommand(RemoteCommand command)
             silenceWarnings();
             return CommandResult::SUCCESS;
 
-        case RemoteCommand::NONE:
         default:
             return CommandResult::INVALID;
     }

@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "espnow_manager.h"
+#include "motion_sensor.h"
 #include "output_controller.h"
 #include "protocol.h"
 #include "state_machine.h"
@@ -35,15 +36,16 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 4");
+    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 5");
     Serial.println("======================================");
 
     OutputController::begin();
     VehicleInputs::begin();
+    MotionSensor::begin();
     StateMachine::begin();
     EspNowManager::begin();
 
-    Serial.println("Phase 4 initialization completed.");
+    Serial.println("Phase 5 initialization completed.");
 }
 
 void loop()
@@ -51,9 +53,15 @@ void loop()
     VehicleInputs::update();
     EspNowManager::update();
 
+    MotionSensor::setMonitoringEnabled(
+        StateMachine::isAntiTheftArmed());
+    MotionSensor::update();
+
     AlarmInputs alarmInputs;
-    alarmInputs.accOn = VehicleInputs::isAccOn();
-    alarmInputs.motionDetected = false;
+    alarmInputs.accOn =
+        VehicleInputs::isAccOn();
+    alarmInputs.motionDetected =
+        MotionSensor::isMotionDetected();
 
     StateMachine::update(alarmInputs);
 
@@ -88,11 +96,37 @@ void loop()
 
         Serial.print(" | ACC=");
         Serial.print(
-            VehicleInputs::isAccOn() ? "ON" : "OFF");
+            VehicleInputs::isAccOn()
+                ? "ON"
+                : "OFF");
 
-        Serial.print(" | ADC=");
+        Serial.print(" | MPU=");
         Serial.print(
-            VehicleInputs::getBatteryAdcRaw());
+            MotionSensor::isAvailable()
+                ? "OK"
+                : "FAIL");
+
+        Serial.print(" | Calibration=");
+        Serial.print(
+            MotionSensor::isCalibrating()
+                ? "YES"
+                : "NO");
+
+        Serial.print(" | Motion=");
+        Serial.print(
+            MotionSensor::isMotionDetected()
+                ? "YES"
+                : "NO");
+
+        Serial.print(" | Vibration=");
+        Serial.print(
+            MotionSensor::getLastVibration(),
+            2);
+
+        Serial.print(" | Tilt=");
+        Serial.print(
+            MotionSensor::getLastTiltDegrees(),
+            1);
 
         Serial.print(" | StarterLock=");
         Serial.print(
