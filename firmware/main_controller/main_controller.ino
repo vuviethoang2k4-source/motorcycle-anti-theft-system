@@ -53,13 +53,6 @@ RemoteCommand smsRequestToRemoteCommand(
     }
 }
 
-/*
- * Mọi nguồn điều khiển đều đi qua cùng một hàm:
- * - remote ESP-NOW;
- * - SMS.
- *
- * Nhờ đó ARM/DISARM luôn được lưu nhất quán vào NVS.
- */
 CommandResult executeSystemCommand(
     RemoteCommand command)
 {
@@ -89,6 +82,17 @@ String buildStatusMessage()
     message += VehicleInputs::isAccOn()
                    ? "ON"
                    : "OFF";
+
+    message += "\nBATTERY: ";
+
+    if (VehicleInputs::isBatteryReadingReady()) {
+        message += String(
+            VehicleInputs::getBatteryVoltage(),
+            2);
+        message += " V";
+    } else {
+        message += "WAIT";
+    }
 
     message += "\nMOTION: ";
     message += MotionSensor::isMotionDetected()
@@ -178,6 +182,14 @@ void queueAlarmSmsOnStateTransition()
         message +=
             StateMachine::getAlarmReasonText();
 
+        if (VehicleInputs::isBatteryReadingReady()) {
+            message += "\nBATTERY: ";
+            message += String(
+                VehicleInputs::getBatteryVoltage(),
+                2);
+            message += " V";
+        }
+
         message += "\n";
         message += GpsManager::getGoogleMapsUrl();
 
@@ -201,9 +213,6 @@ void restorePersistedAntiTheftState()
         return;
     }
 
-    /*
-     * Chỉ khôi phục ARMED, không khôi phục ALARM/FIND/SILENCE.
-     */
     StateMachine::handleCommand(
         RemoteCommand::ARM);
 
@@ -218,7 +227,7 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 8");
+    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 9");
     Serial.println("======================================");
 
     OutputController::begin();
@@ -233,7 +242,7 @@ void setup()
 
     EspNowManager::begin();
 
-    Serial.println("Phase 8 initialization completed.");
+    Serial.println("Phase 9 initialization completed.");
 }
 
 void loop()
@@ -298,6 +307,25 @@ void loop()
                 ? "ON"
                 : "OFF");
 
+        Serial.print(" | ADC=");
+        Serial.print(
+            VehicleInputs::getBatteryAdcRaw());
+
+        Serial.print(" | ADCmV=");
+        Serial.print(
+            VehicleInputs::getBatteryAdcMillivolts());
+
+        Serial.print(" | Battery=");
+
+        if (VehicleInputs::isBatteryReadingReady()) {
+            Serial.print(
+                VehicleInputs::getBatteryVoltage(),
+                2);
+            Serial.print("V");
+        } else {
+            Serial.print("WAIT");
+        }
+
         Serial.print(" | Motion=");
         Serial.print(
             MotionSensor::isMotionDetected()
@@ -315,18 +343,6 @@ void loop()
             SmsManager::isReady()
                 ? "READY"
                 : "NOT READY");
-
-        Serial.print(" | SMS RX=");
-        Serial.print(
-            SmsManager::getReceivedSmsCount());
-
-        Serial.print(" | SMS TX=");
-        Serial.print(
-            SmsManager::getSentSmsCount());
-
-        Serial.print(" | SMS FAIL=");
-        Serial.print(
-            SmsManager::getFailedSmsCount());
 
         Serial.print(" | StarterLock=");
         Serial.print(
