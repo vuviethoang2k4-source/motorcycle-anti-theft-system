@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "espnow_manager.h"
+#include "gps_manager.h"
 #include "motion_sensor.h"
 #include "output_controller.h"
 #include "protocol.h"
@@ -36,22 +37,24 @@ void setup()
 
     Serial.println();
     Serial.println("======================================");
-    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 5");
+    Serial.println(" MOTORCYCLE ANTI-THEFT - MAIN PHASE 6");
     Serial.println("======================================");
 
     OutputController::begin();
     VehicleInputs::begin();
     MotionSensor::begin();
+    GpsManager::begin();
     StateMachine::begin();
     EspNowManager::begin();
 
-    Serial.println("Phase 5 initialization completed.");
+    Serial.println("Phase 6 initialization completed.");
 }
 
 void loop()
 {
     VehicleInputs::update();
     EspNowManager::update();
+    GpsManager::update();
 
     MotionSensor::setMonitoringEnabled(
         StateMachine::isAntiTheftArmed());
@@ -106,27 +109,43 @@ void loop()
                 ? "OK"
                 : "FAIL");
 
-        Serial.print(" | Calibration=");
-        Serial.print(
-            MotionSensor::isCalibrating()
-                ? "YES"
-                : "NO");
-
         Serial.print(" | Motion=");
         Serial.print(
             MotionSensor::isMotionDetected()
                 ? "YES"
                 : "NO");
 
-        Serial.print(" | Vibration=");
+        Serial.print(" | GPS data=");
         Serial.print(
-            MotionSensor::getLastVibration(),
-            2);
+            GpsManager::isReceivingData()
+                ? "YES"
+                : "NO");
 
-        Serial.print(" | Tilt=");
+        Serial.print(" | GPS fix=");
         Serial.print(
-            MotionSensor::getLastTiltDegrees(),
-            1);
+            GpsManager::hasValidFix()
+                ? "YES"
+                : "NO");
+
+        Serial.print(" | Satellites=");
+        Serial.print(
+            GpsManager::getSatelliteCount());
+
+        Serial.print(" | GPS chars=");
+        Serial.print(
+            GpsManager::getCharactersProcessed());
+
+        if (GpsManager::hasValidFix()) {
+            Serial.print(" | Lat=");
+            Serial.print(
+                GpsManager::getLatitude(),
+                6);
+
+            Serial.print(" | Lng=");
+            Serial.print(
+                GpsManager::getLongitude(),
+                6);
+        }
 
         Serial.print(" | StarterLock=");
         Serial.print(
